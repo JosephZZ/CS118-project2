@@ -1,0 +1,28 @@
+Current tasks to finish:
+1, parse the sample file to initialize the forward_table and cost table (the my_cost array), and ID_to_port etc.
+
+2, every 5 seconds, send current cost table to neibors,
+
+3, constantly receive cost table from neighbors,
+	and then use the algorithm to update the cost table and forward table,
+	and updates neighbors immediately.
+	
+4, for each router, create an output file for itself named in the format like "routing-outputB.txt", which contains:
+	1) timestamped routing tables of this router (the cost table and forwarding table together). We only print them when they are changed. 
+	2) the information about any data packets routed through
+		(1)timestamp
+		(2)source node of this data packet (we need print it in A,B..F, not 0,1..5)
+		(3)destination node
+		(4)Current UDP port
+		(5)The next UDP port that the current one is forwarding to
+		(6)For the final destination router, it also needs to print out the text phrase in the data payload.
+
+5, create a traffic/packet generator (look at 11 in Approach section). It's just a server (lets call it H) which:
+	1) only does the job that sends the packet to router A(or any other) with destination D(or any other) using the format we specified, and then exits.
+	2)  before H exits, H should print out to its output file the data packet that it sent to destination D through router A, i.e. 
+		(1)timestamp
+		(2)source node
+		(3)destination node, and the destination port number
+		(4)text phrase in the data payload
+
+6, the extra credit assignment doesn't seem to be too complicated to do. Lets finish the above tasks first and, if still got time, use under 2 to 3 hours to finish as much extra credit as we can. This project worth 30% of the grade, even more than the midterm! I believe most people wouldn't do this part, so it's even worth doing.

@@ -15,9 +15,9 @@
 
 /* For the Datagram
  * send them in string, seperated by commas, in the sequence:
- *    "Type,DestinationNodeID,LengthOfData,Data"
+ *    "Type,SourceNodeID,DestinationNodeID,LengthOfData,Data"
  * For type we should use 'D' here.
- * DestinationNodeID is represented by integers too.
+ * SourceNodeID and DestinationNodeID are represented by integers too.
  * LengthOfData is the number of bytes of the Data
  * eg: "D,2,88,somedatastringhere..."
  * Be aware that Data part might also has comma
