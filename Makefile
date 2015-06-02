@@ -1,4 +1,4 @@
-CC=gcc
+CC=g++
 CFLAGS = -g
 
 all: router
@@ -6,7 +6,7 @@ all: router
 router: router.o
 	$(CC) -o router router.o $(LIBS)
 
-router.o: router.c
+router.o: router.cpp
 
 clean:
 	rm -f router router.o
