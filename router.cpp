@@ -40,7 +40,6 @@ typedef struct {
     int costs[NODE_COUNT];
 } costs_t;
 
-//char ID_to_Name[6]="ABCDEF";
 ////////////////////////////////////////////////////////////////////////////////
 // Functions
 
@@ -62,6 +61,8 @@ void message_to_datagram(char *message, datagram_t *dg);
 void run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_costs);
 void propagate_datagrams(datagram_t *dg);
 
+string ConverToName="ABCDEF";
+int ConvertToSubscript(const char* letter);
 ////////////////////////////////////////////////////////////////////////////////
 // Globals
 
@@ -91,7 +92,8 @@ int main(int argc, char const *argv[])
         // Init
         const char *filename = argv[1];
         g_costs.src_node_id = static_cast<node_id_t>(atoi(argv[2]));
-
+        printf("******************\nServer %c started.\n\n",ConverToName[g_costs.src_node_id]);        
+        
         int neighbor_portnums[NODE_COUNT];//only store port number of neighbors,
                                           // for non-neibors it'll be -1
         initialize_tables(&g_costs, g_forward_table, neighbor_portnums, filename);
@@ -138,6 +140,7 @@ void error_message(string s)
     exit(1);
 }
 
+
 int ConvertToSubscript(const char* letter)
 {
     switch(letter[0])
@@ -168,7 +171,10 @@ void initialize_tables(costs_t *costs, int *forward_table, int *neighbor_portnum
 
     for (int i = 0; i < NODE_COUNT; i++){
         neighbor_portnums[i] = -1;//initialize them to be nothing
-        costs->costs[i] = 9999;//initialize them to be infinity, kinda
+        if (i==costs->src_node_id)
+            costs->costs[i] = 0;//no cost to go to itself
+        else
+            costs->costs[i] = 9999;//initialize them to be infinity, kinda
         forward_table[i] = 9;//initialize them to be bigger than the nodeID of all nodes
                              //for the ease of calculation in the algorithm part
     }
@@ -234,12 +240,12 @@ void initialize_tables(costs_t *costs, int *forward_table, int *neighbor_portnum
 
     // This is for debugging only
     // Print out the routing table, 999 = infinity
-    for (int i = 0; i < NODE_COUNT; i++) printf("Link Costs: %d | ", costs->costs[i]);
+    for (int i = 0; i < NODE_COUNT; i++) printf("Costs To Node %c: %d\n", ConverToName[i], costs->costs[i]);
 
-    printf("\n\n");
+    printf("\n");
 
     // Print out all the port numbers of nodes A,B,C,D,E,F respectively as deduced from file
-    for (int i = 0; i < NODE_COUNT; i++) printf("Port %d Number: %d\n", i, neighbor_portnums[i]);
+    for (int i = 0; i < NODE_COUNT; i++) printf("Port %d Number: %d\n\n", i, neighbor_portnums[i]);
 
     fclose(file);
 }
@@ -269,8 +275,13 @@ void broadcast_costs(costs_t *costs, int* neighbor_portnums)
     costs_to_message(costs, message);
     pthread_mutex_unlock(&g_costs_mutex);
     for (int i = 0; i < NODE_COUNT; i++){
-        if (neighbor_portnums[i] > 0)
+        if (neighbor_portnums[i] > 0){
             router_send("127.0.0.1", message, neighbor_portnums[i]);
+            printf("Sending costs to %c: A=%d, B=%d, C=%d, D=%d, E=%d, F=%d\n",
+                    ConverToName[i],
+                    costs->costs[NODE_A], costs->costs[NODE_B], costs->costs[NODE_C],
+                    costs->costs[NODE_D], costs->costs[NODE_E], costs->costs[NODE_F]);
+        }
     }
 }
 
@@ -359,7 +370,6 @@ void router_listen(int *forward_table, costs_t *costs, int *neighbor_portnums)
                 printf("invalid message\n");
                 break;
         }
-        sleep(1);
     }
 }
 
@@ -398,7 +408,8 @@ void router_send(const char *server, const char *message, int recvr_portnum)
     }
 
     // Send message
-    printf("Sending message \"%s\" to %s port %d\n", message, server, recvr_portnum);
+    //printf("Sending message \"%s\" to %s port %d\n", message, server, recvr_portnum);
+   
     if (sendto(sock_fd, message, strlen(message), 0, (struct sockaddr *)&remote_addr, sizeof(remote_addr)) == -1) {
         perror("sendto");
         return;
@@ -478,12 +489,12 @@ void run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_cost
 {
     pthread_mutex_lock(&g_costs_mutex);
     int neighbor_ID = neighbor_costs->src_node_id;
-    printf ("neighborid: %d\n",neighbor_ID);
+    //printf ("neighborid: %d\n",neighbor_ID);
     for (int i =0; i<6; i++)
     {
         int cost_through_neighbor;
         cost_through_neighbor = costs->costs[neighbor_ID]+neighbor_costs->costs[i];
-        printf("cost_through_neighbor: %d\n",cost_through_neighbor);
+        //printf("cost_through_neighbor: %d\n",cost_through_neighbor);
         if (costs->costs[i]> cost_through_neighbor){
             costs->costs[i] = cost_through_neighbor;
             pthread_mutex_lock(&g_forward_table_mutex);
@@ -497,9 +508,9 @@ void run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_cost
                 forward_table[i] = neighbor_ID;
             pthread_mutex_unlock(&g_forward_table_mutex);
         }
-        for (int i=0;i < (sizeof (costs->costs) /sizeof (costs->costs[0]));i++) {
-            printf("%d\n",costs->costs[i]);
-        }
+        // for (int i=0;i < (sizeof (costs->costs) /sizeof (costs->costs[0]));i++) {
+        //     printf("%d\n",costs->costs[i]);
+        // }
     }
     pthread_mutex_unlock(&g_costs_mutex);
 }
