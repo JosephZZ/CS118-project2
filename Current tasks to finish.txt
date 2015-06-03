@@ -25,3 +25,9 @@ Current tasks to finish:
 	2) forward_table does not have entry for destination
 
 5. the extra credit assignment doesn't seem to be too complicated to do. Lets finish the above tasks first and, if still got time, use under 2 to 3 hours to finish as much extra credit as we can. This project worth 30% of the grade, even more than the midterm! I believe most people wouldn't do this part, so it's even worth doing.
+
+6. Rename to my-router
+
+7. start-router script that initialises and starts the routers in a random order
+
+8. script that calls your my-router binary with an appropriate command line to inject a data packet
