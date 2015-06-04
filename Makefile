@@ -1,12 +1,12 @@
 CC=g++
 CFLAGS = -g
 
-all: router
+all: my-router
 
-router: router.o
-	$(CC) -o router router.o $(LIBS)
+router: my-router.o
+	$(CC) -o my-router my-router.o $(LIBS)
 
-router.o: router.cpp
+my-router.o: my-router.cpp
 
 clean:
-	rm -f router router.o
+	rm -f my-router my-router.o
