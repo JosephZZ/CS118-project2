@@ -544,15 +544,15 @@ bool run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_cost
             pthread_mutex_unlock(&g_forward_table_mutex);
             changed = true;
         }
-        // else if (costs->costs[i] == cost_through_neighbor){
-        //     //if the cost of the two paths are same, choose the neighbor with lowest ID
-        //     pthread_mutex_lock(&g_forward_table_mutex);
-        //     if (forward_table[i] > neighbor_ID) {
-        //         forward_table[i] = neighbor_ID;
-        //         changed = true;
-        //     }
-        //     pthread_mutex_unlock(&g_forward_table_mutex);
-        // }
+        else if (costs->costs[i] == cost_through_neighbor){
+            //if the cost of the two paths are same, choose the neighbor with lowest ID
+            pthread_mutex_lock(&g_forward_table_mutex);
+            if (forward_table[i] > neighbor_ID) {
+                forward_table[i] = neighbor_ID;
+                changed = true;
+            }
+            pthread_mutex_unlock(&g_forward_table_mutex);
+        }
         // for (int i=0;i < (sizeof (costs->costs) /sizeof (costs->costs[0]));i++) {
         //     printf("%d\n",costs->costs[i]);
         // }
