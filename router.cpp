@@ -58,6 +58,7 @@ void costs_to_message(costs_t *costs, char *message);
 void message_to_costs(char *message, costs_t *costs);
 void datagram_to_message(datagram_t *dg, char *message);
 void message_to_datagram(char *message, datagram_t *dg);
+void message_terminate(char *message, costs_t *costs);
 
 bool run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_costs);
 void propagate_datagrams(datagram_t *dg);
@@ -131,6 +132,29 @@ int main(int argc, char const *argv[])
                 }
             }
 
+            int input;
+            while(1)
+            {
+                scanf("%d", &input);
+                if (input == 1)
+                {
+                    // User ended the router
+                    // Broadcast the message to all neighbors
+                    char x_message[BUFSIZE];
+                    sprintf(x_message,"X,%d,9999,9999,9999,9999,9999,9999",g_costs.src_node_id); 
+                    //printf("Node %d terminated\n",g_costs.src_node_id);               
+
+                    for (int i = 0; i < NODE_COUNT; i++)
+                    {
+                        if (neighbor_portnums[i] > 0)
+                        {
+                            router_send("127.0.0.1",x_message,neighbor_portnums[i]);
+                            printf("Sent death message %s\n",x_message);
+                        }
+                    }
+                    exit(0);    
+                }
+            }
             // Wait on the other threads (never reached)
             for(int i = 0; i < 2; i++) {
                 pthread_join(threads[i], NULL);
@@ -405,6 +429,22 @@ void router_listen(int *forward_table, costs_t *costs, int *neighbor_portnums)
                 }
                 break;
             }
+            case 'X': {
+                costs_t neighbor_costs; 
+                message_terminate(msg, &neighbor_costs);
+                printf("Received shutdown message from %c\n", ConverToName[neighbor_costs.src_node_id]); 
+                // Check and update the tables
+                for (int i = 0;i < NODE_COUNT;i++)
+                {
+                    if (forward_table[i] == neighbor_costs.src_node_id)
+                    {
+                        // Reset all infos to blank for this node
+                        forward_table[i] = -1;
+                        costs->costs[i] = 9999;
+                    }
+                }
+                break;
+            }
             default:
                 printf("invalid message\n");
                 break;
@@ -482,6 +522,10 @@ void message_to_costs(char *message, costs_t *costs)
         &costs->costs[NODE_A], &costs->costs[NODE_B], &costs->costs[NODE_C],
         &costs->costs[NODE_D], &costs->costs[NODE_E], &costs->costs[NODE_F]);
 }
+void message_terminate(char *message, costs_t *costs)
+{
+    sscanf(message, "X,%d,%d,%d,%d,%d,%d,%d", &costs->src_node_id, &costs->costs[NODE_A], &costs->costs[NODE_B], &costs->costs[NODE_C],&costs->costs[NODE_D], &costs->costs[NODE_E], &costs->costs[NODE_F]);
+}
 
 /* For the Datagram
  * send them in string, seperated by commas, in the sequence:
@@ -537,25 +581,36 @@ bool run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_cost
         int cost_through_neighbor;
         cost_through_neighbor = costs->costs[neighbor_ID]+neighbor_costs->costs[i];
         //printf("cost_through_neighbor: %d\n",cost_through_neighbor);
-        if (costs->costs[i] > cost_through_neighbor){
+        if (neighbor_ID == forward_table[i] && cost_through_neighbor > costs->costs[i])
+        {
             costs->costs[i] = cost_through_neighbor;
             pthread_mutex_lock(&g_forward_table_mutex);
-            forward_table[i] = neighbor_ID;
+            if (cost_through_neighbor >= 9999)
+            forward_table[i] = -1; // Invalid
             pthread_mutex_unlock(&g_forward_table_mutex);
             changed = true;
         }
-        // else if (costs->costs[i] == cost_through_neighbor){
-        //     //if the cost of the two paths are same, choose the neighbor with lowest ID
-        //     pthread_mutex_lock(&g_forward_table_mutex);
-        //     if (forward_table[i] > neighbor_ID) {
-        //         forward_table[i] = neighbor_ID;
-        //         changed = true;
-        //     }
-        //     pthread_mutex_unlock(&g_forward_table_mutex);
-        // }
-        // for (int i=0;i < (sizeof (costs->costs) /sizeof (costs->costs[0]));i++) {
-        //     printf("%d\n",costs->costs[i]);
-        // }
+        
+            if (costs->costs[i] > cost_through_neighbor){
+                costs->costs[i] = cost_through_neighbor;
+                pthread_mutex_lock(&g_forward_table_mutex);
+                forward_table[i] = neighbor_ID;
+                pthread_mutex_unlock(&g_forward_table_mutex);
+                changed = true;
+            }
+            else if (costs->costs[i] == cost_through_neighbor){
+                //if the cost of the two paths are same, choose the neighbor with lowest ID
+                pthread_mutex_lock(&g_forward_table_mutex);
+                if (forward_table[i] > neighbor_ID) {
+                    forward_table[i] = neighbor_ID;
+                    changed = true;
+                }
+                pthread_mutex_unlock(&g_forward_table_mutex);
+            }
+            // for (int i=0;i < (sizeof (costs->costs) /sizeof (costs->costs[0]));i++) {
+            //     printf("%d\n",costs->costs[i]);
+            // }
+        
     }
 
     pthread_mutex_unlock(&g_costs_mutex);
