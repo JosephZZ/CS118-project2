@@ -18,7 +18,7 @@
 
 using namespace std;
 
-#define INFINTY 9999
+#define INFINITY 9999
 #define BUFSIZE 2048
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -140,9 +140,23 @@ int main(int argc, char const *argv[])
             }
         }
 
-        // Wait on the other threads (never reached)
-        for(int i = 0; i < 2; i++) {
-            pthread_join(threads[i], NULL);
+        // Listen for quit
+        char input;
+        while(1) {
+            scanf("%c", &input);
+            if (input == 'q') {
+                // User ended the router
+                // Broadcast the message to all neighbors
+                char x_message[BUFSIZE];
+                sprintf(x_message,"X,%d", g_costs.src_node_id);
+                for (int i = 0; i < NODE_COUNT; i++) {
+                    if (neighbor_portnums[i] > 0) {
+                        router_send("127.0.0.1", x_message, neighbor_portnums[i]);
+                    }
+                }
+                printf("Broadcasted death message %s\n", x_message);
+                exit(0);
+            }
         }
     } else {
         // Send data
@@ -207,7 +221,7 @@ void initialize_tables(costs_t *costs, int *forward_table, int *neighbor_portnum
         if (i==costs->src_node_id)
             costs->costs[i] = 0;//no cost to go to itself
         else
-            costs->costs[i] = INFINTY;//initialize them to be infinity, kinda
+            costs->costs[i] = INFINITY;//initialize them to be infinity, kinda
         forward_table[i] = 9;//initialize them to be bigger than the nodeID of all nodes
                              //for the ease of calculation in the algorithm part
     }
@@ -287,7 +301,7 @@ void print_costs(costs_t *costs, int *forward_table)
     print_separator();
     // Print out the routing table
     for (int i = 0; i < NODE_COUNT; i++) {
-        if (costs->costs[i] != INFINTY) {
+        if (forward_table[i] < NODE_COUNT) {
             printf("  *  Node %c cost: %d (via %c)\n",
                 ConverToName[i], costs->costs[i], ConverToName[forward_table[i]]);
         }
@@ -339,7 +353,7 @@ void broadcast_costs(costs_t *costs, int* neighbor_portnums)
             router_send("127.0.0.1", message, neighbor_portnums[i]);
         }
     }
-    printf("Broadcasting costs: A=%d, B=%d, C=%d, D=%d, E=%d, F=%d\n",
+    printf("Broadcasted costs: A=%d, B=%d, C=%d, D=%d, E=%d, F=%d\n",
             costs->costs[NODE_A], costs->costs[NODE_B], costs->costs[NODE_C],
             costs->costs[NODE_D], costs->costs[NODE_E], costs->costs[NODE_F]);
 }
@@ -430,6 +444,26 @@ void router_listen(int *forward_table, costs_t *costs, int *neighbor_portnums)
                     router_send("127.0.0.1",msg,forwarding_port);
                     log_datagram_forward(&dg, costs->src_node_id, costs->my_portnum, forwarding_port);
                 }
+                break;
+            }
+            case 'X': {
+                int node_id;
+                sscanf(msg, "X,%d", &node_id);
+                printf("\nDeath message from %c caused update:\n", ConverToName[node_id]);
+                // Check and update the tables
+                for (int i = 0; i < NODE_COUNT; i++) {
+                    if (forward_table[i] == node_id) {
+                        // Reset all info to blank for this node
+                        forward_table[i] = 9;
+                        costs->costs[i] = INFINITY;
+                    }
+                }
+                pthread_mutex_lock(&g_costs_mutex);
+                pthread_mutex_lock(&g_forward_table_mutex);
+                print_costs(costs, forward_table);
+                log_routing_table(forward_table, costs);
+                pthread_mutex_unlock(&g_costs_mutex);
+                pthread_mutex_unlock(&g_forward_table_mutex);
                 break;
             }
             default:
