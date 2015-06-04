@@ -132,6 +132,7 @@ int main(int argc, char const *argv[])
                 }
             }
 
+            //Sony's code
             int input;
             while(1)
             {
@@ -429,6 +430,7 @@ void router_listen(int *forward_table, costs_t *costs, int *neighbor_portnums)
                 }
                 break;
             }
+            //Sony's code
             case 'X': {
                 costs_t neighbor_costs; 
                 message_terminate(msg, &neighbor_costs);
@@ -522,6 +524,7 @@ void message_to_costs(char *message, costs_t *costs)
         &costs->costs[NODE_A], &costs->costs[NODE_B], &costs->costs[NODE_C],
         &costs->costs[NODE_D], &costs->costs[NODE_E], &costs->costs[NODE_F]);
 }
+//Sony's code
 void message_terminate(char *message, costs_t *costs)
 {
     sscanf(message, "X,%d,%d,%d,%d,%d,%d,%d", &costs->src_node_id, &costs->costs[NODE_A], &costs->costs[NODE_B], &costs->costs[NODE_C],&costs->costs[NODE_D], &costs->costs[NODE_E], &costs->costs[NODE_F]);
@@ -581,6 +584,8 @@ bool run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_cost
         int cost_through_neighbor;
         cost_through_neighbor = costs->costs[neighbor_ID]+neighbor_costs->costs[i];
         //printf("cost_through_neighbor: %d\n",cost_through_neighbor);
+
+        //Sony's code
         if (neighbor_ID == forward_table[i] && cost_through_neighbor > costs->costs[i])
         {
             costs->costs[i] = cost_through_neighbor;
