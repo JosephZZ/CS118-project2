@@ -542,7 +542,18 @@ void run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_cost
     {
         int cost_through_neighbor;
         cost_through_neighbor = costs->costs[neighbor_ID]+neighbor_costs->costs[i];
-        //printf("cost_through_neighbor: %d\n",cost_through_neighbor);
+
+	// Check if any node died        
+	if (neighbor_ID == forward_table[i] && cost_through_neighbor > costs->costs[i])
+	{
+	    costs->costs[i] = cost_through_neighbor;
+	    pthread_mutex_lock(&g_forward_table_mutex);
+	    if (cost_through_neighbor >= 9999)
+		forward_table[i] = 9; // Invalid
+	    pthread_mutex_unlock(&g_forward_table_mutex);
+	}
+
+	//printf("cost_through_neighbor: %d\n",cost_through_neighbor);
         if (costs->costs[i]> cost_through_neighbor){
             costs->costs[i] = cost_through_neighbor;
             pthread_mutex_lock(&g_forward_table_mutex);
