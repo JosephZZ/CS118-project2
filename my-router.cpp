@@ -25,7 +25,7 @@ using namespace std;
 // Types
 
 typedef enum {
-    NODE_A, NODE_B, NODE_C, NODE_D, NODE_E, NODE_F, NODE_COUNT
+    NODE_A, NODE_B, NODE_C, NODE_D, NODE_E, NODE_F, NODE_COUNT, NODE_SENDER
 } node_id_t;
 
 typedef struct {
@@ -63,7 +63,7 @@ bool run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_cost
 void propagate_datagrams(datagram_t *dg);
 
 void print_separator();
-void print_costs(costs_t *costs);
+void print_costs(costs_t *costs, int *forward_table);
 void print_ports(int *neighbor_portnums);
 
 void log(node_id_t node_id, const char *prefix, const char *text);
@@ -90,59 +90,80 @@ int g_forward_table[NODE_COUNT];// subscript denotes the destination portID,
 void print_help()
 {
     printf("2 options:\n");
-    printf("     run router:  router <init file> <node id>\n");
-    printf("  send datagram:  router <init file> <node id> -d <message> \n");
+    printf("     run router:  my-router <init file> <node name>\n");
+    printf("  send datagram:  my-router -d <init file> <start node name> <end node name> <data> \n");
 }
 
 int main(int argc, char const *argv[])
 {
-    if (argc < 2) {
-        // Invalid
-        print_help();
+    bool run_router;
+    if (argc == 3) {
+        run_router = true;
+    } else if (argc == 6 && strcmp(argv[1], "-d") == 0) {
+        run_router = false;
     } else {
-        // Init
-        const char *filename = argv[1];
-        g_costs.src_node_id = static_cast<node_id_t>(atoi(argv[2]));
-        int neighbor_portnums[NODE_COUNT];//only store port number of neighbors,
-                                          // for non-neibors it'll be -1
-        initialize_tables(&g_costs, g_forward_table, neighbor_portnums, filename);
+        print_help();
+        return 1;
+    }
 
+    // Init
+    const char *filename = argv[run_router ? 1 : 2];
+    const char *node_name = argv[run_router ? 2 : 3];
+    g_costs.src_node_id = static_cast<node_id_t>(ConvertToSubscript(node_name));
+    int neighbor_portnums[NODE_COUNT];//only store port number of neighbors,
+                                      // for non-neibors it'll be -1
+    initialize_tables(&g_costs, g_forward_table, neighbor_portnums, filename);
+
+    // Run or send
+    if (run_router) {
         printf("******************\nServer %c started.\n",ConverToName[g_costs.src_node_id]);
         print_ports(neighbor_portnums);
-        print_costs(&g_costs);
+        print_costs(&g_costs, g_forward_table);
+        log_routing_table(g_forward_table, &g_costs);
 
-        if (argc == 3) {
-            // Run router
-            pthread_t threads[2];
-            pthread_mutex_init(&g_costs_mutex, NULL);
-            pthread_mutex_init(&g_forward_table_mutex, NULL);
-            for(int i = 0; i < 2; i++) {
-                if (i == 0) {
-                    void *args[2];
-                    args[0] = (void *)&g_costs;
-                    args[1] = (void *)neighbor_portnums;
-                    pthread_create(threads + i, NULL, &router_broadcast_thread, args);
-                } else {
-                    void *args[3];
-                    args[0] = (void *)g_forward_table;
-                    args[1] = (void *)&g_costs;
-                    args[2] = (void *)neighbor_portnums;
-                    pthread_create(threads + i, NULL, &router_listen_thread, args);
-                }
+        // Run router
+        pthread_t threads[2];
+        pthread_mutex_init(&g_costs_mutex, NULL);
+        pthread_mutex_init(&g_forward_table_mutex, NULL);
+        for(int i = 0; i < 2; i++) {
+            if (i == 0) {
+                void *args[2];
+                args[0] = (void *)&g_costs;
+                args[1] = (void *)neighbor_portnums;
+                pthread_create(threads + i, NULL, &router_broadcast_thread, args);
+            } else {
+                void *args[3];
+                args[0] = (void *)g_forward_table;
+                args[1] = (void *)&g_costs;
+                args[2] = (void *)neighbor_portnums;
+                pthread_create(threads + i, NULL, &router_listen_thread, args);
             }
-
-            // Wait on the other threads (never reached)
-            for(int i = 0; i < 2; i++) {
-                pthread_join(threads[i], NULL);
-            }
-        } else if (argc == 5 && strcmp(argv[3], "-d") == 0) {
-            // Send message
-            const char *message = argv[4];
-            router_send("127.0.0.1", message, g_costs.my_portnum);
-        } else {
-            // Invalid
-            print_help();
         }
+
+        // Wait on the other threads (never reached)
+        for(int i = 0; i < 2; i++) {
+            pthread_join(threads[i], NULL);
+        }
+    } else {
+        // Send data
+        // my-router -d <init file> <start node name> <end node name> <data>
+        datagram_t dg;
+        dg.src_node_id = g_costs.src_node_id;
+        dg.dst_node_id = static_cast<node_id_t>(ConvertToSubscript(argv[4]));
+        dg.data_len = strlen(argv[5]);
+        if (dg.data_len > BUFSIZE - 2) {
+            printf("Data too large");
+            return 1;
+        }
+        strcpy(dg.data, argv[5]);
+
+        char message[BUFSIZE];
+        datagram_to_message(&dg, message);
+
+        router_send("127.0.0.1", message, g_costs.my_portnum);
+        printf("Data sent %c->%c (%zu bytes): \"%s\"\n",
+            ConverToName[dg.src_node_id], ConverToName[dg.dst_node_id], dg.data_len, dg.data);
+        log(NODE_SENDER, "SENT", message);
     }
     return 0;
 }
@@ -258,16 +279,17 @@ void initialize_tables(costs_t *costs, int *forward_table, int *neighbor_portnum
 
 void print_separator()
 {
-    printf("  ********************\n");
+    printf("  *************************\n");
 }
 
-void print_costs(costs_t *costs)
+void print_costs(costs_t *costs, int *forward_table)
 {
     print_separator();
     // Print out the routing table
     for (int i = 0; i < NODE_COUNT; i++) {
         if (costs->costs[i] != INFINTY) {
-            printf("  *  Node %c cost: %d\n", ConverToName[i], costs->costs[i]);
+            printf("  *  Node %c cost: %d (via %c)\n",
+                ConverToName[i], costs->costs[i], ConverToName[forward_table[i]]);
         }
     }
     print_separator();
@@ -383,7 +405,12 @@ void router_listen(int *forward_table, costs_t *costs, int *neighbor_portnums)
                         ConverToName[neighbor_costs.src_node_id],
                         neighbor_costs.costs[NODE_A], neighbor_costs.costs[NODE_B], neighbor_costs.costs[NODE_C],
                         neighbor_costs.costs[NODE_D], neighbor_costs.costs[NODE_E], neighbor_costs.costs[NODE_F]);
-                    print_costs(costs);
+                    pthread_mutex_lock(&g_costs_mutex);
+                    pthread_mutex_lock(&g_forward_table_mutex);
+                    print_costs(costs, forward_table);
+                    log_routing_table(forward_table, costs);
+                    pthread_mutex_unlock(&g_costs_mutex);
+                    pthread_mutex_unlock(&g_forward_table_mutex);
                 }
 
                 // printf("Received costs from %d: A=%d, B=%d, C=%d, D=%d, E=%d, F=%d\n",
@@ -607,8 +634,8 @@ void log_routing_table(int *forward_table, costs_t *costs)
 void log_datagram_forward(datagram_t *dg, node_id_t thisnode, int thisport, int fwdport)
 {
     char text[BUFSIZE];
-    sprintf(text, "%d->%d via %d->%d",
-        dg->src_node_id, dg->dst_node_id, thisport, fwdport);
+    sprintf(text, "%c->%c via %d->%d",
+        ConverToName[dg->src_node_id], ConverToName[dg->dst_node_id], thisport, fwdport);
 
     log(thisnode, "FORWARDED", text);
 }
@@ -620,8 +647,8 @@ void log_datagram_forward(datagram_t *dg, node_id_t thisnode, int thisport, int 
 void log_datagram_received(datagram_t *dg, node_id_t thisnode)
 {
     char text[BUFSIZE];
-    sprintf(text, "%d->%d: (%zu bytes) \"%s\"",
-        dg->src_node_id, dg->dst_node_id, dg->data_len, dg->data);
+    sprintf(text, "%c->%c: (%zu bytes) \"%s\"",
+        ConverToName[dg->src_node_id], ConverToName[dg->dst_node_id], dg->data_len, dg->data);
 
     log(thisnode, "RECEIVED", text);
 }
@@ -630,8 +657,16 @@ void log_datagram_received(datagram_t *dg, node_id_t thisnode)
 void log(node_id_t node_id, const char *prefix, const char *text)
 {
     // Open
-    char filename[] = "routing-outputX.txt";
-    filename[14] = ConverToName[node_id];
+    char *filename;
+    if (node_id == NODE_SENDER) {
+        char f[] = "sending-output.txt";
+        filename = f;
+    } else {
+        char f[] = "routing-outputX.txt";
+        f[14] = node_id == NODE_SENDER ? 'H' : ConverToName[node_id];
+        filename = f;
+    }
+
     FILE * log = fopen(filename, "a");
     if (!log) {
         perror("can't open log file");

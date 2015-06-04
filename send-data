@@ -1,0 +1,17 @@
+#!/bin/bash
+#
+# send-data <init file> <start node name> <end node name> <data>
+#
+
+init=$1
+start=$2
+end=$3
+data=$4
+if [ -z "$init" ] || [ -z "$start" ] || [ -z "$end" ] || [ -z "$data" ]; then
+    echo "Usage: send-data <init file> <start node name> <end node name> <data>"
+    exit
+fi
+
+
+
+./my-router -d "$init" "$start" "$end" "$data"
