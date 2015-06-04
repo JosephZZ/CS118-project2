@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# start-router <init-file>
+#
+
+init=$1
+if [ -z "$init" ]; then
+    echo "Usage: start-router <init-file>"
+    exit
+fi
+
+nodes=('A' 'B' 'C' 'D' 'E' 'F')
+
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+echo "!! This script does not actually start the routers     !!"
+echo "!! each router should be started in a different shell, !!"
+echo "!! otherwise the output will be jumbled                !!"
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+
+rem=${#nodes[@]}
+while [ $rem -ne 0 ]
+do
+    random=$(( ( RANDOM % ($rem) ) ))
+    node=${nodes[$random]}
+    echo "Start node" $node "with: ./my-router" $init $node
+    unset nodes[$random]
+    nodes=(${nodes[@]})
+    rem=${#nodes[@]}
+done
+wait

@@ -18,14 +18,14 @@
 
 using namespace std;
 
-#define INFINTY 9999
+#define INFINITY 9999
 #define BUFSIZE 2048
 
 ////////////////////////////////////////////////////////////////////////////////
 // Types
 
 typedef enum {
-    NODE_A, NODE_B, NODE_C, NODE_D, NODE_E, NODE_F, NODE_COUNT
+    NODE_A, NODE_B, NODE_C, NODE_D, NODE_E, NODE_F, NODE_COUNT, NODE_SENDER
 } node_id_t;
 
 typedef struct {
@@ -58,13 +58,12 @@ void costs_to_message(costs_t *costs, char *message);
 void message_to_costs(char *message, costs_t *costs);
 void datagram_to_message(datagram_t *dg, char *message);
 void message_to_datagram(char *message, datagram_t *dg);
-void message_terminate(char *message, costs_t *costs);
 
 bool run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_costs);
 void propagate_datagrams(datagram_t *dg);
 
 void print_separator();
-void print_costs(costs_t *costs);
+void print_costs(costs_t *costs, int *forward_table);
 void print_ports(int *neighbor_portnums);
 
 void log(node_id_t node_id, const char *prefix, const char *text);
@@ -91,83 +90,94 @@ int g_forward_table[NODE_COUNT];// subscript denotes the destination portID,
 void print_help()
 {
     printf("2 options:\n");
-    printf("     run router:  router <init file> <node id>\n");
-    printf("  send datagram:  router <init file> <node id> -d <message> \n");
+    printf("     run router:  my-router <init file> <node name>\n");
+    printf("  send datagram:  my-router -d <init file> <start node name> <end node name> <data> \n");
 }
 
 int main(int argc, char const *argv[])
 {
-    if (argc < 2) {
-        // Invalid
-        print_help();
+    bool run_router;
+    if (argc == 3) {
+        run_router = true;
+    } else if (argc == 6 && strcmp(argv[1], "-d") == 0) {
+        run_router = false;
     } else {
-        // Init
-        const char *filename = argv[1];
-        g_costs.src_node_id = static_cast<node_id_t>(atoi(argv[2]));
-        int neighbor_portnums[NODE_COUNT];//only store port number of neighbors,
-                                          // for non-neibors it'll be -1
-        initialize_tables(&g_costs, g_forward_table, neighbor_portnums, filename);
+        print_help();
+        return 1;
+    }
 
+    // Init
+    const char *filename = argv[run_router ? 1 : 2];
+    const char *node_name = argv[run_router ? 2 : 3];
+    g_costs.src_node_id = static_cast<node_id_t>(ConvertToSubscript(node_name));
+    int neighbor_portnums[NODE_COUNT];//only store port number of neighbors,
+                                      // for non-neibors it'll be -1
+    initialize_tables(&g_costs, g_forward_table, neighbor_portnums, filename);
+
+    // Run or send
+    if (run_router) {
         printf("******************\nServer %c started.\n",ConverToName[g_costs.src_node_id]);
         print_ports(neighbor_portnums);
-        print_costs(&g_costs);
+        print_costs(&g_costs, g_forward_table);
+        log_routing_table(g_forward_table, &g_costs);
 
-        if (argc == 3) {
-            // Run router
-            pthread_t threads[2];
-            pthread_mutex_init(&g_costs_mutex, NULL);
-            pthread_mutex_init(&g_forward_table_mutex, NULL);
-            for(int i = 0; i < 2; i++) {
-                if (i == 0) {
-                    void *args[2];
-                    args[0] = (void *)&g_costs;
-                    args[1] = (void *)neighbor_portnums;
-                    pthread_create(threads + i, NULL, &router_broadcast_thread, args);
-                } else {
-                    void *args[3];
-                    args[0] = (void *)g_forward_table;
-                    args[1] = (void *)&g_costs;
-                    args[2] = (void *)neighbor_portnums;
-                    pthread_create(threads + i, NULL, &router_listen_thread, args);
-                }
+        // Run router
+        pthread_t threads[2];
+        pthread_mutex_init(&g_costs_mutex, NULL);
+        pthread_mutex_init(&g_forward_table_mutex, NULL);
+        for(int i = 0; i < 2; i++) {
+            if (i == 0) {
+                void *args[2];
+                args[0] = (void *)&g_costs;
+                args[1] = (void *)neighbor_portnums;
+                pthread_create(threads + i, NULL, &router_broadcast_thread, args);
+            } else {
+                void *args[3];
+                args[0] = (void *)g_forward_table;
+                args[1] = (void *)&g_costs;
+                args[2] = (void *)neighbor_portnums;
+                pthread_create(threads + i, NULL, &router_listen_thread, args);
             }
-
-            //Sony's code
-            int input;
-            while(1)
-            {
-                scanf("%d", &input);
-                if (input == 1)
-                {
-                    // User ended the router
-                    // Broadcast the message to all neighbors
-                    char x_message[BUFSIZE];
-                    sprintf(x_message,"X,%d,9999,9999,9999,9999,9999,9999",g_costs.src_node_id); 
-                    //printf("Node %d terminated\n",g_costs.src_node_id);               
-
-                    for (int i = 0; i < NODE_COUNT; i++)
-                    {
-                        if (neighbor_portnums[i] > 0)
-                        {
-                            router_send("127.0.0.1",x_message,neighbor_portnums[i]);
-                            printf("Sent death message %s\n",x_message);
-                        }
-                    }
-                    exit(0);    
-                }
-            }
-            // Wait on the other threads (never reached)
-            for(int i = 0; i < 2; i++) {
-                pthread_join(threads[i], NULL);
-            }
-        } else if (argc == 5 && strcmp(argv[3], "-d") == 0) {
-            // Send message
-            const char *message = argv[4];
-            router_send("127.0.0.1", message, g_costs.my_portnum);
-        } else {
-            // Invalid
-            print_help();
         }
+
+        // Listen for quit
+        char input;
+        while(1) {
+            scanf("%c", &input);
+            if (input == 'q') {
+                // User ended the router
+                // Broadcast the message to all neighbors
+                char x_message[BUFSIZE];
+                sprintf(x_message,"X,%d", g_costs.src_node_id);
+                for (int i = 0; i < NODE_COUNT; i++) {
+                    if (neighbor_portnums[i] > 0) {
+                        router_send("127.0.0.1", x_message, neighbor_portnums[i]);
+                    }
+                }
+                printf("Broadcasted death message %s\n", x_message);
+                exit(0);
+            }
+        }
+    } else {
+        // Send data
+        // my-router -d <init file> <start node name> <end node name> <data>
+        datagram_t dg;
+        dg.src_node_id = g_costs.src_node_id;
+        dg.dst_node_id = static_cast<node_id_t>(ConvertToSubscript(argv[4]));
+        dg.data_len = strlen(argv[5]);
+        if (dg.data_len > BUFSIZE - 2) {
+            printf("Data too large");
+            return 1;
+        }
+        strcpy(dg.data, argv[5]);
+
+        char message[BUFSIZE];
+        datagram_to_message(&dg, message);
+
+        router_send("127.0.0.1", message, g_costs.my_portnum);
+        printf("Data sent %c->%c (%zu bytes): \"%s\"\n",
+            ConverToName[dg.src_node_id], ConverToName[dg.dst_node_id], dg.data_len, dg.data);
+        log(NODE_SENDER, "SENT", message);
     }
     return 0;
 }
@@ -211,7 +221,7 @@ void initialize_tables(costs_t *costs, int *forward_table, int *neighbor_portnum
         if (i==costs->src_node_id)
             costs->costs[i] = 0;//no cost to go to itself
         else
-            costs->costs[i] = INFINTY;//initialize them to be infinity, kinda
+            costs->costs[i] = INFINITY;//initialize them to be infinity, kinda
         forward_table[i] = 9;//initialize them to be bigger than the nodeID of all nodes
                              //for the ease of calculation in the algorithm part
     }
@@ -283,16 +293,17 @@ void initialize_tables(costs_t *costs, int *forward_table, int *neighbor_portnum
 
 void print_separator()
 {
-    printf("  ********************\n");
+    printf("  *************************\n");
 }
 
-void print_costs(costs_t *costs)
+void print_costs(costs_t *costs, int *forward_table)
 {
     print_separator();
     // Print out the routing table
     for (int i = 0; i < NODE_COUNT; i++) {
-        if (costs->costs[i] != INFINTY) {
-            printf("  *  Node %c cost: %d\n", ConverToName[i], costs->costs[i]);
+        if (forward_table[i] < NODE_COUNT) {
+            printf("  *  Node %c cost: %d (via %c)\n",
+                ConverToName[i], costs->costs[i], ConverToName[forward_table[i]]);
         }
     }
     print_separator();
@@ -342,7 +353,7 @@ void broadcast_costs(costs_t *costs, int* neighbor_portnums)
             router_send("127.0.0.1", message, neighbor_portnums[i]);
         }
     }
-    printf("Broadcasting costs: A=%d, B=%d, C=%d, D=%d, E=%d, F=%d\n",
+    printf("Broadcasted costs: A=%d, B=%d, C=%d, D=%d, E=%d, F=%d\n",
             costs->costs[NODE_A], costs->costs[NODE_B], costs->costs[NODE_C],
             costs->costs[NODE_D], costs->costs[NODE_E], costs->costs[NODE_F]);
 }
@@ -408,7 +419,12 @@ void router_listen(int *forward_table, costs_t *costs, int *neighbor_portnums)
                         ConverToName[neighbor_costs.src_node_id],
                         neighbor_costs.costs[NODE_A], neighbor_costs.costs[NODE_B], neighbor_costs.costs[NODE_C],
                         neighbor_costs.costs[NODE_D], neighbor_costs.costs[NODE_E], neighbor_costs.costs[NODE_F]);
-                    print_costs(costs);
+                    pthread_mutex_lock(&g_costs_mutex);
+                    pthread_mutex_lock(&g_forward_table_mutex);
+                    print_costs(costs, forward_table);
+                    log_routing_table(forward_table, costs);
+                    pthread_mutex_unlock(&g_costs_mutex);
+                    pthread_mutex_unlock(&g_forward_table_mutex);
                 }
 
                 // printf("Received costs from %d: A=%d, B=%d, C=%d, D=%d, E=%d, F=%d\n",
@@ -430,21 +446,24 @@ void router_listen(int *forward_table, costs_t *costs, int *neighbor_portnums)
                 }
                 break;
             }
-            //Sony's code
             case 'X': {
-                costs_t neighbor_costs; 
-                message_terminate(msg, &neighbor_costs);
-                printf("Received shutdown message from %c\n", ConverToName[neighbor_costs.src_node_id]); 
+                int node_id;
+                sscanf(msg, "X,%d", &node_id);
+                printf("\nDeath message from %c caused update:\n", ConverToName[node_id]);
                 // Check and update the tables
-                for (int i = 0;i < NODE_COUNT;i++)
-                {
-                    if (forward_table[i] == neighbor_costs.src_node_id)
-                    {
-                        // Reset all infos to blank for this node
-                        forward_table[i] = -1;
-                        costs->costs[i] = 9999;
+                for (int i = 0; i < NODE_COUNT; i++) {
+                    if (forward_table[i] == node_id) {
+                        // Reset all info to blank for this node
+                        forward_table[i] = 9;
+                        costs->costs[i] = INFINITY;
                     }
                 }
+                pthread_mutex_lock(&g_costs_mutex);
+                pthread_mutex_lock(&g_forward_table_mutex);
+                print_costs(costs, forward_table);
+                log_routing_table(forward_table, costs);
+                pthread_mutex_unlock(&g_costs_mutex);
+                pthread_mutex_unlock(&g_forward_table_mutex);
                 break;
             }
             default:
@@ -524,11 +543,6 @@ void message_to_costs(char *message, costs_t *costs)
         &costs->costs[NODE_A], &costs->costs[NODE_B], &costs->costs[NODE_C],
         &costs->costs[NODE_D], &costs->costs[NODE_E], &costs->costs[NODE_F]);
 }
-//Sony's code
-void message_terminate(char *message, costs_t *costs)
-{
-    sscanf(message, "X,%d,%d,%d,%d,%d,%d,%d", &costs->src_node_id, &costs->costs[NODE_A], &costs->costs[NODE_B], &costs->costs[NODE_C],&costs->costs[NODE_D], &costs->costs[NODE_E], &costs->costs[NODE_F]);
-}
 
 /* For the Datagram
  * send them in string, seperated by commas, in the sequence:
@@ -584,38 +598,33 @@ bool run_dv_algorithm(int *forward_table, costs_t *costs, costs_t *neighbor_cost
         int cost_through_neighbor;
         cost_through_neighbor = costs->costs[neighbor_ID]+neighbor_costs->costs[i];
         //printf("cost_through_neighbor: %d\n",cost_through_neighbor);
-
-        //Sony's code
         if (neighbor_ID == forward_table[i] && cost_through_neighbor > costs->costs[i])
         {
             costs->costs[i] = cost_through_neighbor;
             pthread_mutex_lock(&g_forward_table_mutex);
             if (cost_through_neighbor >= 9999)
-            forward_table[i] = -1; // Invalid
+            forward_table[i] = 9; // Invalid
+            pthread_mutex_unlock(&g_forward_table_mutex);
+        }
+        if (costs->costs[i] > cost_through_neighbor){
+            costs->costs[i] = cost_through_neighbor;
+            pthread_mutex_lock(&g_forward_table_mutex);
+            forward_table[i] = neighbor_ID;
             pthread_mutex_unlock(&g_forward_table_mutex);
             changed = true;
         }
-        
-            if (costs->costs[i] > cost_through_neighbor){
-                costs->costs[i] = cost_through_neighbor;
-                pthread_mutex_lock(&g_forward_table_mutex);
+        else if (costs->costs[i] == cost_through_neighbor){
+            //if the cost of the two paths are same, choose the neighbor with lowest ID
+            pthread_mutex_lock(&g_forward_table_mutex);
+            if (forward_table[i] > neighbor_ID) {
                 forward_table[i] = neighbor_ID;
-                pthread_mutex_unlock(&g_forward_table_mutex);
                 changed = true;
             }
-            else if (costs->costs[i] == cost_through_neighbor){
-                //if the cost of the two paths are same, choose the neighbor with lowest ID
-                pthread_mutex_lock(&g_forward_table_mutex);
-                if (forward_table[i] > neighbor_ID) {
-                    forward_table[i] = neighbor_ID;
-                    changed = true;
-                }
-                pthread_mutex_unlock(&g_forward_table_mutex);
-            }
-            // for (int i=0;i < (sizeof (costs->costs) /sizeof (costs->costs[0]));i++) {
-            //     printf("%d\n",costs->costs[i]);
-            // }
-        
+            pthread_mutex_unlock(&g_forward_table_mutex);
+        }
+        // for (int i=0;i < (sizeof (costs->costs) /sizeof (costs->costs[0]));i++) {
+        //     printf("%d\n",costs->costs[i]);
+        // }
     }
 
     pthread_mutex_unlock(&g_costs_mutex);
@@ -667,8 +676,8 @@ void log_routing_table(int *forward_table, costs_t *costs)
 void log_datagram_forward(datagram_t *dg, node_id_t thisnode, int thisport, int fwdport)
 {
     char text[BUFSIZE];
-    sprintf(text, "%d->%d via %d->%d",
-        dg->src_node_id, dg->dst_node_id, thisport, fwdport);
+    sprintf(text, "%c->%c via %d->%d",
+        ConverToName[dg->src_node_id], ConverToName[dg->dst_node_id], thisport, fwdport);
 
     log(thisnode, "FORWARDED", text);
 }
@@ -680,8 +689,8 @@ void log_datagram_forward(datagram_t *dg, node_id_t thisnode, int thisport, int 
 void log_datagram_received(datagram_t *dg, node_id_t thisnode)
 {
     char text[BUFSIZE];
-    sprintf(text, "%d->%d: (%zu bytes) \"%s\"",
-        dg->src_node_id, dg->dst_node_id, dg->data_len, dg->data);
+    sprintf(text, "%c->%c: (%zu bytes) \"%s\"",
+        ConverToName[dg->src_node_id], ConverToName[dg->dst_node_id], dg->data_len, dg->data);
 
     log(thisnode, "RECEIVED", text);
 }
@@ -690,8 +699,16 @@ void log_datagram_received(datagram_t *dg, node_id_t thisnode)
 void log(node_id_t node_id, const char *prefix, const char *text)
 {
     // Open
-    char filename[] = "routing-outputX.txt";
-    filename[14] = ConverToName[node_id];
+    char *filename;
+    if (node_id == NODE_SENDER) {
+        char f[] = "sending-output.txt";
+        filename = f;
+    } else {
+        char f[] = "routing-outputX.txt";
+        f[14] = node_id == NODE_SENDER ? 'H' : ConverToName[node_id];
+        filename = f;
+    }
+
     FILE * log = fopen(filename, "a");
     if (!log) {
         perror("can't open log file");
